@@ -5,21 +5,30 @@ import sys
 import re
 import binascii
 
-def crc8(data,bits=8):
-    crc = 0xFFFF
-    for op, code in zip(data[0::2], data[1::2]):
-        crc = crc ^ int(op + code, 16)
-        for bit in range(0, bits):
-            if (crc & 0x0001) == 0x0001:
-                crc = ((crc >> 1) ^ 0xA001)
-            else:
-                crc = crc >> 1
-    return typecasting(crc)
 
-def typecasting(crc):
-    msb = hex(crc >> 8)
-    lsb = hex(crc & 0x00FF)
-    return lsb + msb
+def crc8(msg):
+    msg = bytearray(msg)
+    check = 0
+    for i in msg:
+        check = addToCRC(i, check)
+    checkH =  hex(check)
+    if len(checkH) == 3:
+        checkH = "0x0" + checkH[2]
+        # print checkH
+    return checkH
+
+
+def addToCRC(b, crc):
+    if b < 0:
+        b += 256
+    for i in range(8):
+        odd = ((b ^ crc) & 1) == 1
+        crc >>= 1
+        b >>= 1
+        if odd:
+            crc ^= 0x8C     # this means crc ^= 140
+    return crc
+
 
 def Framepack(filename):
     # Open a file
@@ -43,8 +52,8 @@ def Framepack(filename):
     type = ["08","00"]
 
     header_data = ""
-    for j in range(0,num+1):
-        print j
+    for j in range(0,num+2):
+        # print j
         for i in range(0,7):
             header_data += "0xAA"
         header_data += "0xAB"
@@ -58,75 +67,89 @@ def Framepack(filename):
         if j != (num + 1) and j != 0:
             fd = "write: " + fo.read(743)
             header_data += fd
-            # dataCrc = crc8(fd,1500)
-            # header_data += dataCrc
-            # print dataCrc
+            crcRes = crc8(fd)
+            dataCrc = crcRes
+            header_data += dataCrc
         elif j == 0:
             fd = "creat file: " + newFile
             header_data += fd
             # print len(fd)
-            # dataCrc = crc8(fd,1500)
-            # header_data += dataCrc
-            # print dataCrc
-        else:
+            crcRes = crc8(fd)
+            print "len:", len(crcRes)
+            dataCrc = crcRes
+            header_data += dataCrc
+        if j == (num + 1):
+            print "kkkkk"
             lastP = fo.tell()
             fd = "lastFrame:" + fo.read(sum-lastP)
             header_data += fd
-            # dataCrc = crc8(fd,sum-lastP)
-            # header_data += dataCrc
-            # print dataCrc
+            crcRes = crc8(fd)
+            print "len:",len(crcRes)
+            dataCrc = crcRes
+            header_data += dataCrc
+        print "crcCode :",dataCrc
     header_data = binascii.b2a_hex(header_data)
-    print header_data[0:100]
     op.write(header_data)
     op.close()
+    fo.close()
     print "file packed!"
     print newFile + " created!"
-    print fName
+    print "共",num+2,"帧"
 
 
 def Frameunpack(filename):
     fo = open(filename,"rb+")
-    sum = fo.tell()
     fo.seek(0)
-    fContent = fo.read(7000)
+    fContent = fo.read()
+    newPackage = filename + "parse"
+    np = open(newPackage, "wb+")
+    writeContent = ""
     fContent = binascii.a2b_hex(fContent)
     # fContent = binascii.unhexlify(fContent)
-    print fContent
     checkStr = "0xAA0xAA0xAA0xAA0xAA0xAA0xAA0xAB"
     num = fContent.count(checkStr)
-    for j in range(0 ,num+1):
-        preAmble = ""
-        locator = ""
-        Des = ""
-        Src = ""
-        Type = ""
-        dataContent = ""
-        for i in range(0,7):
-            preAmble += (binascii.a2b_hex(fo.read(8))[2:4] + " ")
-        locator = binascii.a2b_hex(fo.read(8))[2:4]
-        for i in range(0,6):
-            Des += (binascii.a2b_hex(fo.read(4)) + " ")
-        for i in range(0, 6):
-            Src += (binascii.a2b_hex(fo.read(4)) + " ")
-        for i in range(0, 2):
-            Type += (binascii.a2b_hex(fo.read(4)) + " ")
-        if j != (num + 1) and j != 0:
-            dataContent = binascii.a2b_hex(fo.read(1500))
-        elif j==0 :
-            pos = fContent.find("write: ")
-            dataContent = binascii.a2b_hex(fo.read((pos - 2)/3 - 2))
-        print "序号:", j
+    fArray =  fContent.split('0xAA0xAA0xAA0xAA0xAA0xAA0xAA0xAB',num)
+    fo.seek(0)
+    crcVerify = "break"
+    preAmble = ""
+    locator = ""
+    Des = ""
+    Src = ""
+    Type = ""
+    for j in range(0, 7):
+        preAmble += (binascii.a2b_hex(fo.read(8))[2:4] + " ")
+    locator = binascii.a2b_hex(fo.read(8))[2:4]
+    for j in range(0, 6):
+        Des += (binascii.a2b_hex(fo.read(4)) + " ")
+    for j in range(0, 6):
+        Src += (binascii.a2b_hex(fo.read(4)) + " ")
+    for j in range(0, 2):
+        Type += (binascii.a2b_hex(fo.read(4)) + " ")
+
+    for i in range(1,len(fArray)):
+    # for i in range(1, 5):
+        dataContent = fArray[i]
+        dataContent = dataContent.replace("FFFFFFFFFFFF001676B4E4770800","")[:-4]
+        writeContent += dataContent
+        crcData = fArray[i][-4:]
+        # crcData = binascii.b2a_hex(crcD)
+        crcCheck = crc8(dataContent)
+        if crcData == crcCheck:
+            crcVerify = "ACCEPT"
+        print "序号:", i
         print "前导码:", preAmble
         print "帧前定位符:", locator
         print "目的地址:",Des.replace(" ","-",5)
         print "源地址:", Src.replace(" ","-",5)
         print "类型字段:", Type
+        print "CRC校验:", crcData
         print "数据字段:", dataContent
-        # print "CRC校验:", crcData
-        print fo.tell()
-        print "dddddddddd",num
-
-    print "File parsed"
+        print "状态:",crcVerify
+        print "  "
+    np.write(writeContent)
+    np.close()
+    fo.close()
+    print "帧解析结束,共",len(fArray) - 1,"帧,请查阅文件",newPackage
 
 
 if __name__ == "__main__" and len(sys.argv) > 2:
