@@ -1,2 +1,2 @@
-# ethernet-frameparser-with-python
+# Ethernet Frameparser
 ####Include File Encapsulation and Parsing, integrated with CRC verificaiton.
